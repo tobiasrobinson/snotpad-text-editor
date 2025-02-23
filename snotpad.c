@@ -19,9 +19,9 @@
 
 /*** defines ***/
 
-#define SNOT_VERSION "0.0.1"
-#define SNOT_TAB_STOP 8
-#define SNOT_QUIT_TIMES 3
+#define SNOTPAD_VERSION "0.0.1"
+#define SNOTPAD_TAB_STOP 8
+#define SNOTPAD_QUIT_TIMES 3
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
@@ -215,7 +215,7 @@ int editorRowCxToRx(erow *row, int cx) {
   int j;
   for (j = 0; j < cx; j++) {
     if (row->chars[j] == '\t')
-      rx += (SNOT_TAB_STOP - 1) - (rx % SNOT_TAB_STOP);
+      rx += (SNOTPAD_TAB_STOP - 1) - (rx % SNOTPAD_TAB_STOP);
     rx++;
   }
   return rx;
@@ -229,13 +229,13 @@ void editorUpdateRow(erow *row) {
       tabs++;
 
   free(row->render);
-  row->render = malloc(row->size + tabs * (SNOT_TAB_STOP - 1) + 1);
+  row->render = malloc(row->size + tabs * (SNOTPAD_TAB_STOP - 1) + 1);
 
   int idx = 0;
   for (j = 0; j < row->size; j++) {
     if (row->chars[j] == '\t') {
       row->render[idx++] = ' ';
-      while (idx % SNOT_TAB_STOP != 0)
+      while (idx % SNOTPAD_TAB_STOP != 0)
         row->render[idx++] = ' ';
     } else {
       row->render[idx++] = row->chars[j];
@@ -245,10 +245,13 @@ void editorUpdateRow(erow *row) {
   row->rsize = idx;
 }
 
-void editorAppendRow(char *s, size_t len) {
-  E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+void editorInsertRow(int at, char *s, size_t len) {
+  if (at < 0 || at > E.numrows)
+    return;
 
-  int at = E.numrows;
+  E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+  memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at));
+
   E.row[at].size = len;
   E.row[at].chars = malloc(len + 1);
   memcpy(E.row[at].chars, s, len);
@@ -266,6 +269,7 @@ void editorFreeRow(erow *row) {
   free(row->render);
   free(row->chars);
 }
+
 void editorDelRow(int at) {
   if (at < 0 || at >= E.numrows)
     return;
@@ -308,20 +312,42 @@ void editorRowDelChar(erow *row, int at) {
 
 void editorInsertChar(int c) {
   if (E.cy == E.numrows) {
-    editorAppendRow("", 0);
+    editorInsertRow(E.numrows, "", 0);
   }
   editorRowInsertChar(&E.row[E.cy], E.cx, c);
   E.cx++;
 }
 
+void editorInsertNewline() {
+  if (E.cx == 0) {
+    editorInsertRow(E.cy, "", 0);
+  } else {
+    erow *row = &E.row[E.cy];
+    editorInsertRow(E.cy + 1, &row->chars[E.cx], row->size - E.cx);
+    row = &E.row[E.cy];
+    row->size = E.cx;
+    row->chars[row->size] = '\0';
+    editorUpdateRow(row);
+  }
+  E.cy++;
+  E.cx = 0;
+}
+
 void editorDelChar() {
   if (E.cy == E.numrows)
+    return;
+  if (E.cx == 0 && E.cy == 0)
     return;
 
   erow *row = &E.row[E.cy];
   if (E.cx > 0) {
     editorRowDelChar(row, E.cx - 1);
     E.cx--;
+  } else {
+    E.cx = E.row[E.cy - 1].size;
+    editorRowAppendString(&E.row[E.cy - 1], row->chars, row->size);
+    editorDelRow(E.cy);
+    E.cy--;
   }
 }
 
@@ -361,7 +387,7 @@ void editorOpen(char *filename) {
     while (linelen > 0 &&
            (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
       linelen--;
-    editorAppendRow(line, linelen);
+    editorInsertRow(E.numrows, line, linelen);
   }
   free(line);
   fclose(fp);
@@ -443,8 +469,9 @@ void editorDrawRows(struct abuf *ab) {
     if (filerow >= E.numrows) {
       if (E.numrows == 0 && y == E.screenrows / 3) {
         char welcome[80];
-        int welcomelen = snprintf(welcome, sizeof(welcome),
-                                  "Snotpad editor -- version %s", SNOT_VERSION);
+        int welcomelen =
+            snprintf(welcome, sizeof(welcome), "Snotpad editor -- version %s",
+                     SNOTPAD_VERSION);
         if (welcomelen > E.screencols)
           welcomelen = E.screencols;
         int padding = (E.screencols - welcomelen) / 2;
@@ -491,12 +518,12 @@ void editorDrawStatusBar(struct abuf *ab) {
       len++;
     }
   }
-  abAppend(ab, "\x1b[m]", 3);
+  abAppend(ab, "\x1b[m", 3);
   abAppend(ab, "\r\n", 2);
 }
 
 void editorDrawMessageBar(struct abuf *ab) {
-  abAppend(ab, "\x1b[K]", 3);
+  abAppend(ab, "\x1b[K", 3);
   int msglen = strlen(E.statusmsg);
   if (msglen > E.screencols)
     msglen = E.screencols;
@@ -577,13 +604,13 @@ void editorMoveCursor(int key) {
 }
 
 void editorProcessKeypress() {
-  static int quit_times = SNOT_QUIT_TIMES;
+  static int quit_times = SNOTPAD_QUIT_TIMES;
 
   int c = editorReadKey();
 
   switch (c) {
   case '\r':
-    /* TODO */
+    editorInsertNewline();
     break;
 
   case CTRL_KEY('q'):
@@ -651,7 +678,7 @@ void editorProcessKeypress() {
     break;
   }
 
-  quit_times = SNOT_QUIT_TIMES;
+  quit_times = SNOTPAD_QUIT_TIMES;
 }
 
 /*** init ***/
